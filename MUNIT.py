@@ -5,55 +5,64 @@ import time
 from tensorflow.contrib.data import batch_and_drop_remainder
 
 class MUNIT(object) :
-    def __init__(self, sess, args):
+    def __init__(self, sess, config):
         self.model_name = 'MUNIT'
         self.sess = sess
-        self.checkpoint_dir = args.checkpoint_dir
-        self.result_dir = args.result_dir
-        self.log_dir = args.log_dir
-        self.sample_dir = args.sample_dir
-        self.dataset_name = args.dataset
-        self.augment_flag = args.augment_flag
+        self.phase = config["phase"]
+        self.checkpoint_dir = config['checkpoint_dir']
+        self.result_dir = config['result_dir']
+        self.log_dir = config['log_dir']
+        self.sample_dir = config['sample_dir']
+        self.dataset_name = config['dataset']
+        self.prefix = config[ 'prefix' ]
+        self.augment_flag = config['augment_flag']
 
-        self.epoch = args.epoch
-        self.iteration = args.iteration
+        self.epoch = config['epoch']
+        self.iteration = config['iteration']
 
-        self.gan_type = args.gan_type
+        self.gan_type = config['gan_type']
 
-        self.batch_size = args.batch_size
-        self.print_freq = args.print_freq
-        self.save_freq = args.save_freq
-        self.num_style = args.num_style # for test
-        self.guide_img = args.guide_img
-        self.direction = args.direction
+        self.batch_size = config['batch_size']
+        self.print_freq = config['print_freq']
+        self.save_freq = config['save_freq']
+        self.img_freq = config['img_freq']
+        self.num_style = config['num_style'] # for test
+        self.guide_img = config['guide_img']
+        self.direction = config['direction']
 
-        self.img_h = args.img_h
-        self.img_w = args.img_w
-        self.img_ch = args.img_ch
+        self.img_h = config['img_h']
+        self.img_w = config['img_w']
+        self.img_ch = config['img_ch']
+        self.num_workers = config["num_workers"]
 
-        self.init_lr = args.lr
-        self.ch = args.ch
+        self.init_lr = config['lr']
+        self.ch = config['ch']
 
         """ Weight """
-        self.gan_w = args.gan_w
-        self.recon_x_w = args.recon_x_w
-        self.recon_s_w = args.recon_s_w
-        self.recon_c_w = args.recon_c_w
-        self.recon_x_cyc_w = args.recon_x_cyc_w
+        self.gan_w = config['gan_w']
+        self.recon_x_w = config['recon_x_w']
+        self.recon_s_w = config['recon_s_w']
+        self.recon_c_w = config['recon_c_w']
+        self.recon_x_cyc_w = config['recon_x_cyc_w']
+        self.vgg_w = config['vgg_w']
+        self.vgg_layer_names = config["vgg_layer_names"].split(",")
+        self.vgg_weight = config['vgg_weight_file']
 
         """ Generator """
-        self.n_res = args.n_res
-        self.mlp_dim = pow(2, args.n_sample) * args.ch # default : 256
+        self.n_res = config['n_res']
+        self.mlp_dim = config['mlp_dim']
 
-        self.n_downsample = args.n_sample
-        self.n_upsample = args.n_sample
-        self.style_dim = args.style_dim
+        self.n_downsample = config['n_sample']
+        self.n_upsample = config['n_sample']
+        self.style_dim = config['style_dim']
+
 
         """ Discriminator """
-        self.n_dis = args.n_dis
-        self.n_scale = args.n_scale
+        self.n_dis = config['n_dis']
+        self.n_scale = config['n_scale']
 
-        self.sample_dir = os.path.join(args.sample_dir, self.model_dir)
+
+        self.sample_dir = os.path.join(config['sample_dir'], self.model_dir)
         check_folder(self.sample_dir)
 
         self.trainA_dataset = glob('./dataset/{}/*.*'.format(self.dataset_name + '/trainA'))
@@ -63,11 +72,14 @@ class MUNIT(object) :
         print("##### Information #####")
         print("# gan type : ", self.gan_type)
         print("# dataset : ", self.dataset_name)
+        print("# model directory : ", self.model_dir)
         print("# max dataset number : ", self.dataset_num)
         print("# batch_size : ", self.batch_size)
         print("# epoch : ", self.epoch)
         print("# iteration per epoch : ", self.iteration)
         print("# style in test phase : ", self.num_style)
+        print("# VGG16 layer names : ", self.vgg_layer_names)
+        print("# VGG16 weight file : ", self.vgg_weight)
 
         print()
 
@@ -101,7 +113,7 @@ class MUNIT(object) :
 
                 channel = channel * 2
 
-            for i in range(2) :
+            for i in range(self.n_downsample - 2) :
                 x = conv(x, channel, kernel=4, stride=2, pad=1, pad_type='reflect', scope='down_conv_'+str(i))
                 x = relu(x)
 
@@ -233,6 +245,8 @@ class MUNIT(object) :
 
     def build_model(self):
         self.lr = tf.placeholder(tf.float32, name='learning_rate')
+        lr_scal = tf.summary.scalar( "Learning_Rate", self.lr )
+        self.lr_sum = tf.summary.merge( [ lr_scal ] )
 
         """ Input Image"""
         Image_Data_Class = ImageData(self.img_h, self.img_w, self.img_ch, self.augment_flag)
@@ -240,16 +254,15 @@ class MUNIT(object) :
         trainA = tf.data.Dataset.from_tensor_slices(self.trainA_dataset)
         trainB = tf.data.Dataset.from_tensor_slices(self.trainB_dataset)
 
-        trainA = trainA.prefetch(self.batch_size).shuffle(self.dataset_num).map(Image_Data_Class.image_processing, num_parallel_calls=8).apply(batch_and_drop_remainder(self.batch_size)).repeat()
-        trainB = trainB.prefetch(self.batch_size).shuffle(self.dataset_num).map(Image_Data_Class.image_processing, num_parallel_calls=8).apply(batch_and_drop_remainder(self.batch_size)).repeat()
+        trainA = trainA.prefetch(self.batch_size).shuffle(self.dataset_num).map(Image_Data_Class.image_processing, num_parallel_calls=self.num_workers).apply(batch_and_drop_remainder(self.batch_size)).repeat()
+        trainB = trainB.prefetch(self.batch_size).shuffle(self.dataset_num).map(Image_Data_Class.image_processing, num_parallel_calls=self.num_workers).apply(batch_and_drop_remainder(self.batch_size)).repeat()
 
         trainA_iterator = trainA.make_one_shot_iterator()
         trainB_iterator = trainB.make_one_shot_iterator()
-
-
+        
+        """ Get image batch"""
         self.domain_A = trainA_iterator.get_next()
         self.domain_B = trainB_iterator.get_next()
-
 
         """ Define Encoder, Generator, Discriminator """
         self.style_a = tf.placeholder(tf.float32, shape=[self.batch_size, 1, 1, self.style_dim], name='style_a')
@@ -271,10 +284,20 @@ class MUNIT(object) :
         content_b_, style_a_ = self.Encoder_A(x_ba, reuse=True)
         content_a_, style_b_ = self.Encoder_B(x_ab, reuse=True)
 
+        self.A_image = tf.summary.image( 'A', self.domain_A )
+        self.B_image = tf.summary.image( 'B', self.domain_B )
+        self.AA_image = tf.summary.image( 'AA', x_aa )
+        self.BB_image = tf.summary.image( 'BB', x_bb )
+
         # decode again (if needed)
         if self.recon_x_cyc_w > 0 :
             x_aba = self.Decoder_A(content_B=content_a_, style_A=style_a_prime, reuse=True)
             x_bab = self.Decoder_B(content_A=content_b_, style_B=style_b_prime, reuse=True)
+
+            self.ABA_image = tf.summary.image( 'ABA', x_aba )
+            self.BAB_image = tf.summary.image( 'BAB', x_bab )
+
+            self.Image_Sum = tf.summary.merge( [ self.A_image, self.B_image, self.AA_image, self.BB_image, self.ABA_image, self.BAB_image ] )
 
             cyc_recon_A = L1_loss(x_aba, self.domain_A)
             cyc_recon_B = L1_loss(x_bab, self.domain_B)
@@ -282,6 +305,9 @@ class MUNIT(object) :
         else :
             cyc_recon_A = 0.0
             cyc_recon_B = 0.0
+
+            self.Image_Sum = tf.summary.merge( [ self.A_image, self.B_image, self.AA_image, self.BB_image ] )
+            
 
         real_A_logit, real_B_logit = self.discriminate_real(self.domain_A, self.domain_B)
         fake_A_logit, fake_B_logit = self.discriminate_fake(x_ba, x_ab)
@@ -306,18 +332,25 @@ class MUNIT(object) :
         recon_content_A = L1_loss(content_a_, content_a)
         recon_content_B = L1_loss(content_b_, content_b)
 
+        """Load perceptual loss (VGG16) network"""
+        if self.vgg_w > 0:
+            G_vgg_loss_a, G_vgg_loss_b = compute_vgg_loss( [x_ba, self.domain_B, x_ab, self.domain_A], self.vgg_layer_names, self.batch_size, self.img_ch, self.vgg_weight )
+        else:
+            G_vgg_loss_a = G_vgg_loss_b = 0.0
 
         Generator_A_loss = self.gan_w * G_ad_loss_a + \
                            self.recon_x_w * recon_A + \
                            self.recon_s_w * recon_style_A + \
                            self.recon_c_w * recon_content_A + \
-                           self.recon_x_cyc_w * cyc_recon_A
+                           self.recon_x_cyc_w * cyc_recon_A + \
+                           self.vgg_w * G_vgg_loss_a
 
         Generator_B_loss = self.gan_w * G_ad_loss_b + \
                            self.recon_x_w * recon_B + \
                            self.recon_s_w * recon_style_B + \
                            self.recon_c_w * recon_content_B + \
-                           self.recon_x_cyc_w * cyc_recon_B
+                           self.recon_x_cyc_w * cyc_recon_B + \
+                           self.vgg_w * G_vgg_loss_b
 
         Discriminator_A_loss = self.gan_w * D_ad_loss_a
         Discriminator_B_loss = self.gan_w * D_ad_loss_b
@@ -341,9 +374,16 @@ class MUNIT(object) :
         self.G_B_loss = tf.summary.scalar("G_B_loss", Generator_B_loss)
         self.D_A_loss = tf.summary.scalar("D_A_loss", Discriminator_A_loss)
         self.D_B_loss = tf.summary.scalar("D_B_loss", Discriminator_B_loss)
-
-        self.G_loss = tf.summary.merge([self.G_A_loss, self.G_B_loss, self.all_G_loss])
-        self.D_loss = tf.summary.merge([self.D_A_loss, self.D_B_loss, self.all_D_loss])
+        
+        if self.vgg_w > 0:
+            self.G_A_vgg_loss = tf.summary.scalar( "G_A_vgg_loss", G_vgg_loss_a )
+            self.G_B_vgg_loss = tf.summary.scalar( "G_B_vgg_loss", G_vgg_loss_b )
+    
+            self.G_loss = tf.summary.merge([self.G_A_loss, self.G_B_loss, self.all_G_loss, self.G_A_vgg_loss, self.G_B_vgg_loss])
+            self.D_loss = tf.summary.merge([self.D_A_loss, self.D_B_loss, self.all_D_loss])
+        else:
+            self.G_loss = tf.summary.merge( [ self.G_A_loss, self.G_B_loss, self.all_G_loss ] )
+            self.D_loss = tf.summary.merge( [ self.D_A_loss, self.D_B_loss, self.all_D_loss ] )
 
         """ Image """
         self.fake_A = x_ba
@@ -352,37 +392,44 @@ class MUNIT(object) :
         self.real_A = self.domain_A
         self.real_B = self.domain_B
 
-        """ Test """
-        self.test_image = tf.placeholder(tf.float32, [1, self.img_h, self.img_w, self.img_ch], name='test_image')
-        self.test_style = tf.placeholder(tf.float32, [1, 1, 1, self.style_dim], name='test_style')
+        if self.phase == "test":
+            """ Test """
+            self.test_image = tf.placeholder(tf.float32, [1, self.img_h, self.img_w, self.img_ch], name='test_image')
+            self.test_style = tf.placeholder(tf.float32, [1, 1, 1, self.style_dim], name='test_style')
+    
+            test_content_a, _ = self.Encoder_A(self.test_image, reuse=True)
+            test_content_b, _ = self.Encoder_B(self.test_image, reuse=True)
+    
+            self.test_fake_A = self.Decoder_A(content_B=test_content_b, style_A=self.test_style, reuse=True)
+            self.test_fake_B = self.Decoder_B(content_A=test_content_a, style_B=self.test_style, reuse=True)
 
-        test_content_a, _ = self.Encoder_A(self.test_image, reuse=True)
-        test_content_b, _ = self.Encoder_B(self.test_image, reuse=True)
-
-        self.test_fake_A = self.Decoder_A(content_B=test_content_b, style_A=self.test_style, reuse=True)
-        self.test_fake_B = self.Decoder_B(content_A=test_content_a, style_B=self.test_style, reuse=True)
-
-        """ Guided Image Translation """
-        self.content_image = tf.placeholder(tf.float32, [1, self.img_h, self.img_w, self.img_ch], name='content_image')
-        self.style_image = tf.placeholder(tf.float32, [1, self.img_h, self.img_w, self.img_ch], name='guide_style_image')
-
-        if self.direction == 'a2b' :
-            guide_content_A, guide_style_A = self.Encoder_A(self.content_image, reuse=True)
-            guide_content_B, guide_style_B = self.Encoder_B(self.style_image, reuse=True)
-
-        else :
-            guide_content_B, guide_style_B = self.Encoder_B(self.content_image, reuse=True)
-            guide_content_A, guide_style_A = self.Encoder_A(self.style_image, reuse=True)
-
-        self.guide_fake_A = self.Decoder_A(content_B=guide_content_B, style_A=guide_style_A, reuse=True)
-        self.guide_fake_B = self.Decoder_B(content_A=guide_content_A, style_B=guide_style_B, reuse=True)
+        if self.phase == "guide":
+            """ Guided Image Translation """
+            self.content_image = tf.placeholder(tf.float32, [1, self.img_h, self.img_w, self.img_ch], name='content_image')
+            self.style_image = tf.placeholder(tf.float32, [1, self.img_h, self.img_w, self.img_ch], name='guide_style_image')
+    
+            if self.direction == 'a2b' :
+                guide_content_A, guide_style_A = self.Encoder_A(self.content_image, reuse=True)
+                guide_content_B, guide_style_B = self.Encoder_B(self.style_image, reuse=True)
+    
+            else :
+                guide_content_B, guide_style_B = self.Encoder_B(self.content_image, reuse=True)
+                guide_content_A, guide_style_A = self.Encoder_A(self.style_image, reuse=True)
+    
+            self.guide_fake_A = self.Decoder_A(content_B=guide_content_B, style_A=guide_style_A, reuse=True)
+            self.guide_fake_B = self.Decoder_B(content_A=guide_content_A, style_B=guide_style_B, reuse=True)
 
     def train(self):
+        #print( tf.get_collection( tf.GraphKeys.TRAINABLE_VARIABLES ) )
+        #print("")
+        #print( tf.all_variables() )
+        #return
+        print("########## Starting training ##########")
         # initialize all variables
         tf.global_variables_initializer().run()
 
         # saver to save model
-        self.saver = tf.train.Saver()
+        self.saver = tf.train.Saver(max_to_keep=0)
 
         # summary writer
         self.writer = tf.summary.FileWriter(self.log_dir + '/' + self.model_dir, self.sess.graph)
@@ -405,7 +452,7 @@ class MUNIT(object) :
         for epoch in range(start_epoch, self.epoch):
 
             lr = self.init_lr * pow(0.5, epoch)
-
+            
             for idx in range(start_batch_id, self.iteration):
                 style_a = np.random.normal(loc=0.0, scale=1.0, size=[self.batch_size, 1, 1, self.style_dim])
                 style_b = np.random.normal(loc=0.0, scale=1.0, size=[self.batch_size, 1, 1, self.style_dim])
@@ -421,8 +468,13 @@ class MUNIT(object) :
                 self.writer.add_summary(summary_str, counter)
 
                 # Update G
-                batch_A_images, batch_B_images, fake_A, fake_B, _, g_loss, summary_str = self.sess.run([self.real_A, self.real_B, self.fake_A, self.fake_B, self.G_optim, self.Generator_loss, self.G_loss], feed_dict = train_feed_dict)
+                batch_A_images, batch_B_images, fake_A, fake_B, _, g_loss, summary_str, summary_image, summary_lr = self.sess.run([self.real_A, self.real_B, self.fake_A, self.fake_B, self.G_optim, self.Generator_loss, self.G_loss, self.Image_Sum, self.lr_sum], feed_dict = train_feed_dict)
                 self.writer.add_summary(summary_str, counter)
+                
+                self.writer.add_summary(summary_lr, counter)
+                
+                if np.mod( idx + 1, self.img_freq ) == 0:
+                    self.writer.add_summary( summary_image, counter )
 
                 # display training status
                 counter += 1
@@ -452,7 +504,10 @@ class MUNIT(object) :
 
     @property
     def model_dir(self):
-        return "{}_{}_{}".format(self.model_name, self.dataset_name, self.gan_type)
+        if self.prefix is not None:
+            return "{}_{}_{}_{}".format(self.model_name, self.dataset_name, self.gan_type, self.prefix)
+        else:
+            return "{}_{}_{}".format( self.model_name, self.dataset_name, self.gan_type )
 
     def save(self, checkpoint_dir, step):
         checkpoint_dir = os.path.join(checkpoint_dir, self.model_dir)

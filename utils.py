@@ -3,6 +3,7 @@ from tensorflow.contrib import slim
 from scipy import misc
 import os, random
 import numpy as np
+import yaml
 
 # https://people.eecs.berkeley.edu/~taesung_park/CycleGAN/datasets/
 # https://people.eecs.berkeley.edu/~tinghuiz/projects/pix2pix/datasets/
@@ -78,3 +79,7 @@ def check_folder(log_dir):
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
     return log_dir
+
+def get_config(config):
+    with open(config, 'r') as stream:
+        return yaml.load(stream)

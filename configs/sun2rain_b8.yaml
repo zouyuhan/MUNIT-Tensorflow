@@ -1,0 +1,45 @@
+
+# training options
+phase: train                  # train or test or guide
+dataset: sun2rain             # dataset_name
+augment_flag: false           # Image augmentation use or not
+GPU: 3                        # ID of GPUs to be used for env variable CUDA_VISIBLE_DEVICES
+          
+# optimization options
+epoch: 10                     # The number of epochs to run
+iteration: 100000             # The number of training iterations
+batch_size: 8                 # The batch size
+print_freq: 1000              # The number of image_print_freq
+save_freq: 1000               # The number of ckpt_save_freq
+num_style: 5                  # number of styles to sample
+direction: a2b                # direction of style guided image translation
+guide_img: guide.jpg          # Style guided image translation
+
+# model options
+gan_type: lsgan               # GAN loss type [gan / lsgan]
+
+lr: 0.0001                    # The learning rate
+gan_w: 1.0                    # weight of adversarial loss
+recon_x_w: 10.0               # weight of image reconstruction loss
+recon_s_w: 1.0                # weight of style reconstruction loss
+recon_c_w: 1.0                # weight of content reconstruction loss
+recon_x_cyc_w: 0.0            # weight of explicit style augmented cycle consistency loss
+
+ch: 64                        # base channel number per layer
+style_dim: 8                  # length of style code
+n_sample: 2                   # number of sampling layers in content encoder
+n_res: 4                      # number of residual blocks in content encoder/decoder
+
+n_dis: 4                      # number of discriminator layer
+n_scale: 3                    # number of scales
+
+img_h: 256                    # The size of image hegiht
+img_w: 256                    # The size of image width
+img_ch: 3                     # The size of image channel
+
+# logging options
+prefix: batched_8            # Prefix for all directory names
+checkpoint_dir: checkpoint    # Directory name to save the checkpoints
+result_dir: results           # Directory name to save the generated images
+log_dir: logs                 # Directory name to save training logs
+sample_dir: samples           # Directory name to save the samples on training

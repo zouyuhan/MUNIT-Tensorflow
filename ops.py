@@ -1,5 +1,6 @@
 import tensorflow as tf
 import tensorflow.contrib as tf_contrib
+import vgg16
 
 weight_init = tf_contrib.layers.variance_scaling_initializer() # kaming init for encoder / decoder
 weight_regularizer = tf_contrib.layers.l2_regularizer(scale=0.0001)
@@ -181,3 +182,83 @@ def L1_loss(x, y):
     loss = tf.reduce_mean(tf.abs(x - y))
 
     return loss
+
+def compute_vgg_loss( images, layer_names, batch_size, ch, vgg_weight):
+    # images = [ba, B , ab, A]
+    """ Preprocess images """
+    processed = [vgg_preprocess( i ) for i in images]
+    #ba = vgg_preprocess( ba )
+    #ab = vgg_preprocess( ab )
+    #B = vgg_preprocess( B )
+    #A = vgg_preprocess( A )
+    
+    img_shape = processed[-1].get_shape()
+    h = img_shape[1]
+    w = img_shape[2]
+    
+    layers_ = list()
+    
+    with tf.name_scope( "VGG16" ):
+        # Create first instance of the VGG16-model
+        vgg1 = vgg16.Vgg16( vgg_weight , h, w, ch )
+        
+        for enum, i in enumerate(processed):
+            with tf.variable_scope( tf.get_variable_scope(), reuse = True ):
+                with tf.name_scope( "p"+str(enum) ):
+                    vgg1.build( i )
+                    layers_.append(vgg1.get_layer_tensors(layer_names, enum))
+        
+        # vgg1.build( ba )
+        # layers_ba = vgg1.get_layer_tensors( layer_names )
+        # vgg1.build( A )
+        # layers_A = vgg1.get_layer_tensors( layer_names )
+        # vgg1.build( ab )
+        # layers_ab = vgg1.get_layer_tensors( layer_names )
+
+        vgg1.data_dict = None
+
+        # Create second instance of the VGG16-model
+        # vgg1 = vgg16.Vgg16( vgg_weight, h, w, ch )
+        # vgg1.build( ba )
+        # layers_ba = vgg1.get_layer_tensors( layer_names )
+        
+        # compute perceptual loss
+        with tf.variable_scope( 'loss_a', reuse=tf.AUTO_REUSE ):
+            loss_a = tf.zeros( batch_size, tf.float32 )
+            for f, f_ in zip( layers_[0], layers_[1] ):
+                loss_a += tf.reduce_mean( tf.subtract( instance_norm(f), instance_norm(f_) ) ** 2, [ 1, 2, 3 ] )
+    
+        with tf.variable_scope( 'loss_b', reuse=tf.AUTO_REUSE ):
+            loss_b = tf.zeros( batch_size, tf.float32 )
+            for f, f_ in zip( layers_[2], layers_[3] ):
+                loss_b += tf.reduce_mean( tf.subtract( instance_norm(f), instance_norm(f_) ) ** 2, [ 1, 2, 3 ] )
+        
+    return tf.reduce_mean(loss_a), tf.reduce_mean(loss_b)
+
+def vgg_preprocess(image, means=[123.68, 116.78, 103.94]):
+    """Subtracts the given means from each image channel.
+    For example:
+    means = [123.68, 116.779, 103.939]
+    image = _mean_image_subtraction(image, means)
+    Note that the rank of `image` must be known.
+    Args:
+    image: a tensor of size [height, width, C].
+    means: a C-vector of values to subtract from each channel.
+    Returns:
+    the centered image.
+    Raises:
+    ValueError: If the rank of `image` is unknown, if `image` has a rank other
+      than three or if the number of channels in `image` doesn't match the
+      number of values in `means`.
+    """
+    if image.get_shape().ndims < 3:
+        raise ValueError('Input must be of size [height, width, C>0]')
+    num_channels = image.get_shape().as_list()[-1]
+    print("Number of channels: %d"%num_channels)
+    if len(means) != num_channels:
+        raise ValueError('len(means) must match the number of channels')
+    
+    channels = tf.split(axis=-1, num_or_size_splits=num_channels, value=image)
+    for i in range(num_channels):
+        channels[i] -= means[i]
+    return tf.concat(axis=-1, values=channels)
